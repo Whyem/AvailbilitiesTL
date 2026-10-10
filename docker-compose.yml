@@ -1,0 +1,7 @@
+# Self-hosted mawaqit-api used by the backend for Germany (and any other Mawaqit mosque).
+services:
+  mawaqit-api:
+    image: mrsofiane/mawaqit-api:latest
+    ports:
+      - "8000:80"
+    restart: unless-stopped

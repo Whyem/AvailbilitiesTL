@@ -1,0 +1,71 @@
+# Builds the site and today's prayer data, then publishes both to GitHub Pages.
+# Runs on every push to main, daily (to refresh the times), and on demand.
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # 00:30 UTC: just after midnight in Morocco (Habous only serves "today").
+    # 12:30 UTC: second run in case the first one failed.
+    # GitHub may delay scheduled runs by a few minutes.
+    - cron: '30 0 * * *'
+    - cron: '30 12 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      # Self-hosted mawaqit-api for the Germany times (see server/sources/mawaqit.js).
+      mawaqit-api:
+        image: mrsofiane/mawaqit-api:latest
+        ports:
+          - 8000:80
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Wait for mawaqit-api
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/api/v1/ > /dev/null && exit 0
+            sleep 2
+          done
+          echo "mawaqit-api did not start" && exit 1
+
+      - name: Fetch prayer times
+        run: npm run build:data
+        env:
+          MAWAQIT_URL: http://localhost:8000
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
